@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum DrinkStatus {
+  AVAILABLE // en el menú y se puede pedir
+  UNAVAILABLE // dado de baja temporalmente (se acabó)
+}
+
+enum OrderStatus {
+  PENDING
+  PREPARING
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+enum MovementType {
+  PURCHASE // entrada / compra
+  CONSUMPTION // salida por bebida entregada
+  WASTE // merma
+  ADJUSTMENT // ajuste por conteo físico
+}
+
+// Cuentas del personal de barra (único acceso con contraseña: /admin)
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  movements InventoryMovement[]
+}
+
+// Quien pide desde el kiosco: se identifica solo con compañía + nombre
+model Customer {
+  id         String   @id @default(cuid())
+  company    String
+  name       String
+  // compañía|nombre normalizados (minúsculas, sin acentos ni espacios dobles): base del límite diario
+  key        String   @unique
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  orders Order[]
+
+  @@index([company])
+}
+
+model Drink {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  category    String
+  imageUrl    String?
+  status      DrinkStatus @default(AVAILABLE)
+  sortOrder   Int         @default(0)
+  // "Eliminar" es borrado lógico cuando la bebida ya tiene pedidos, para no romper el historial
+  deletedAt   DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  recipe RecipeItem[]
+  orders Order[]
+
+  @@index([deletedAt, status])
+}
+
+model RecipeItem {
+  id              String        @id @default(cuid())
+  drinkId         String
+  inventoryItemId String
+  quantity        Decimal       @db.Decimal(12, 3)
+  drink           Drink         @relation(fields: [drinkId], references: [id], onDelete: Cascade)
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+
+  @@unique([drinkId, inventoryItemId])
+}
+
+model InventoryItem {
+  id        String   @id @default(cuid())
+  name      String
+  unit      String // pieza, ml, g, botella, lata...
+  stock     Decimal  @default(0) @db.Decimal(12, 3)
+  minStock  Decimal  @default(0) @db.Decimal(12, 3)
+  unitCost  Decimal  @default(0) @db.Decimal(12, 2)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recipes   RecipeItem[]
+  movements InventoryMovement[]
+}
+
+model InventoryMovement {
+  id        String        @id @default(cuid())
+  itemId    String
+  type      MovementType
+  // Con signo: + entra al inventario, - sale
+  quantity  Decimal       @db.Decimal(12, 3)
+  unitCost  Decimal?      @db.Decimal(12, 2)
+  note      String?
+  dayKey    String // YYYY-MM-DD en APP_TIMEZONE
+  orderId   String?
+  userId    String?
+  createdAt DateTime      @default(now())
+  item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  order     Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  user      User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([dayKey])
+  @@index([itemId, dayKey])
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  customerId  String
+  drinkId     String
+  status      OrderStatus @default(PENDING)
+  notes       String?
+  dayKey      String // YYYY-MM-DD en APP_TIMEZONE, base del límite diario
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deliveredAt DateTime?
+  customer    Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  drink       Drink       @relation(fields: [drinkId], references: [id])
+  movements   InventoryMovement[]
+
+  @@index([customerId, dayKey])
+  @@index([status, createdAt])
+  @@index([dayKey])
+}
