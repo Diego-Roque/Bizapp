@@ -1,69 +1,88 @@
-import Image from "next/image";
+import { Suspense } from "react";
+import Link from "next/link";
+import { connection } from "next/server";
+import { LockSimpleIcon } from "@phosphor-icons/react/dist/ssr";
+import { BrandMark } from "@/components/app-header";
+import { Poller } from "@/components/poller";
+import { Bone } from "@/components/skeletons";
+import { db } from "@/lib/db";
+import { DAILY_DRINK_LIMIT } from "@/lib/config";
+import { dayKey, todayLabel } from "@/lib/day";
+import { getMenu } from "@/lib/menu";
+import { Kiosk } from "./_kiosk/kiosk";
 
-export default function Home() {
+export const metadata = { title: "Pide tu bebida · BizBar" };
+
+async function KioskContent() {
+  await connection(); // siempre en vivo: el menú y "listos para recoger" cambian a cada rato
+  const today = dayKey();
+  const [menu, companies, ready] = await Promise.all([
+    getMenu(),
+    db.customer.findMany({
+      distinct: ["company"],
+      orderBy: { lastSeenAt: "desc" },
+      take: 60,
+      select: { company: true },
+    }),
+    db.order.findMany({
+      where: { dayKey: today, status: "READY" },
+      orderBy: { updatedAt: "asc" },
+      select: { id: true, customer: { select: { name: true } }, drink: { select: { name: true } } },
+    }),
+  ]);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <>
+      <Poller seconds={10} />
+      <Kiosk
+        today={todayLabel()}
+        limit={DAILY_DRINK_LIMIT}
+        drinks={menu}
+        companies={companies.map((c) => c.company)}
+        ready={ready.map((o) => ({ id: o.id, name: o.customer.name, drink: o.drink.name }))}
+      />
+    </>
+  );
+}
+
+export default function KioskPage() {
+  return (
+    <div className="ambient flex min-h-[100dvh] flex-col">
+      <header className="glass sticky top-0 z-40 border-b border-line">
+        <div className="mx-auto flex h-16 max-w-[1240px] items-center justify-between px-4 md:px-8">
+          <BrandMark />
+          <Link
+            href="/admin"
+            className="pressable flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-2 hover:bg-surface-2 hover:text-ink"
           >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <LockSimpleIcon className="size-4" />
+            Barra
+          </Link>
         </div>
-      </main>
+      </header>
+      <Suspense
+        fallback={
+          <div
+            className="mx-auto grid w-full max-w-[1240px] gap-8 px-4 pt-8 md:px-8 md:pt-10 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-10"
+            aria-busy="true"
+            aria-label="Cargando"
+          >
+            <div>
+              <Bone className="h-4 w-40" />
+              <Bone className="mt-3 h-11 w-80" />
+              <Bone className="mt-8 h-10 w-96 rounded-full" />
+              <div className="mt-6 grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 xl:grid-cols-4">
+                {Array.from({ length: 8 }, (_, i) => (
+                  <Bone key={i} className="aspect-square rounded-[24px]" />
+                ))}
+              </div>
+            </div>
+            <Bone className="hidden h-[520px] rounded-[28px] lg:block" />
+          </div>
+        }
+      >
+        <KioskContent />
+      </Suspense>
     </div>
   );
 }
