@@ -17,11 +17,11 @@ async function PeopleContent() {
   const [customers, staff] = await Promise.all([
     db.customer.findMany({
       where: { orders: { some: { dayKey: { gte: start, lt: end } } } },
-      orderBy: [{ company: "asc" }, { name: "asc" }],
+      orderBy: [{ company: { name: "asc" } }, { name: "asc" }],
       select: {
         id: true,
         name: true,
-        company: true,
+        company: { select: { name: true } },
         orders: {
           where: { dayKey: { gte: start, lt: end }, status: { not: "CANCELLED" } },
           select: { dayKey: true },
@@ -38,7 +38,7 @@ async function PeopleContent() {
         customers={customers.map((c) => ({
           id: c.id,
           name: c.name,
-          company: c.company,
+          company: c.company.name,
           today: c.orders.filter((o) => o.dayKey === today).length,
           month: c.orders.length,
         }))}

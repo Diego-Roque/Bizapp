@@ -39,19 +39,34 @@ model User {
   movements InventoryMovement[]
 }
 
-// Quien pide desde el kiosco: se identifica solo con compañía + nombre
+// Compañías que pueden pedir en el kiosco (las da de alta la barra)
+model Company {
+  id        String    @id @default(cuid())
+  name      String
+  // nombre normalizado (minúsculas, sin acentos ni espacios dobles): evita duplicados
+  key       String    @unique
+  // "Eliminar" es borrado lógico cuando alguien de la compañía ya pidió, para no romper el historial
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  employees Customer[]
+}
+
+// Empleado de una compañía: quien pide desde el kiosco eligiendo compañía + nombre
 model Customer {
-  id         String   @id @default(cuid())
-  company    String
+  id         String    @id @default(cuid())
+  companyId  String
   name       String
-  // compañía|nombre normalizados (minúsculas, sin acentos ni espacios dobles): base del límite diario
-  key        String   @unique
-  createdAt  DateTime @default(now())
-  lastSeenAt DateTime @default(now())
+  // nombre normalizado: base del límite diario y de "no repetir empleado en la misma compañía"
+  nameKey    String
+  deletedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   orders Order[]
 
-  @@index([company])
+  @@unique([companyId, nameKey])
 }
 
 model Drink {

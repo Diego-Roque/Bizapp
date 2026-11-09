@@ -18,7 +18,7 @@ async function BarPageContent() {
       where: { status: { in: ["PENDING", "PREPARING", "READY"] } },
       orderBy: { createdAt: "asc" },
       include: {
-        customer: { select: { name: true, company: true } },
+        customer: { select: { name: true, company: { select: { name: true } } } },
         drink: { select: { name: true, category: true, imageUrl: true } },
       },
     }),
@@ -37,7 +37,7 @@ async function BarPageContent() {
           id: o.id,
           status: o.status as "PENDING" | "PREPARING" | "READY",
           person: o.customer.name,
-          company: o.customer.company,
+          company: o.customer.company.name,
           notes: o.notes,
           time: timeLabel(o.createdAt),
           createdAt: o.createdAt.toISOString(),

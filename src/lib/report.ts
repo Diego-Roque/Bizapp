@@ -10,7 +10,7 @@ export async function getMonthlyReport(month: string) {
   const [orders, items, monthMovements, laterMovements] = await Promise.all([
     db.order.findMany({
       where: { dayKey: inMonth },
-      select: { status: true, dayKey: true, customerId: true, customer: { select: { company: true } }, drink: { select: { id: true, name: true, category: true } } },
+      select: { status: true, dayKey: true, customerId: true, customer: { select: { company: { select: { name: true } } } }, drink: { select: { id: true, name: true, category: true } } },
     }),
     db.inventoryItem.findMany({ orderBy: { name: "asc" } }),
     db.inventoryMovement.findMany({ where: { dayKey: inMonth }, select: { itemId: true, type: true, quantity: true, unitCost: true } }),
@@ -25,10 +25,11 @@ export async function getMonthlyReport(month: string) {
 
   const byCompanyMap = new Map<string, { company: string; delivered: number; people: Set<string> }>();
   for (const o of delivered) {
-    const row = byCompanyMap.get(o.customer.company) ?? { company: o.customer.company, delivered: 0, people: new Set<string>() };
+    const company = o.customer.company.name;
+    const row = byCompanyMap.get(company) ?? { company, delivered: 0, people: new Set<string>() };
     row.delivered += 1;
     row.people.add(o.customerId);
-    byCompanyMap.set(o.customer.company, row);
+    byCompanyMap.set(company, row);
   }
   const companies = [...byCompanyMap.values()]
     .map((c) => ({ company: c.company, delivered: c.delivered, people: c.people.size }))

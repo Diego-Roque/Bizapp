@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { BellRingingIcon, CheckIcon, MagnifyingGlassIcon, PintGlassIcon } from "@phosphor-icons/react";
+import { BellRingingIcon, CaretUpDownIcon, CheckIcon, MagnifyingGlassIcon, PintGlassIcon } from "@phosphor-icons/react";
 import { checkAllowance, placeOrder, undoOrder } from "@/app/actions/orders";
 import type { MenuDrink } from "@/lib/menu";
 import { DrinkArt } from "@/components/drink-art";
@@ -16,6 +16,7 @@ const CONFIRM_RESET_S = 8;
 const spring = { type: "spring" as const, bounce: 0, duration: 0.4 };
 
 type Ready = { id: string; name: string; drink: string };
+export type KioskCompany = { id: string; name: string; employees: { id: string; name: string }[] };
 type Done = { orderId: string; drink: MenuDrink; name: string; remaining: number };
 
 export function Kiosk({
@@ -28,23 +29,26 @@ export function Kiosk({
   today: string;
   limit: number;
   drinks: MenuDrink[];
-  companies: string[];
+  companies: KioskCompany[];
   ready: Ready[];
 }) {
   const wide = useMedia("(min-width: 1024px)");
-  const [company, setCompany] = useState("");
-  const [name, setName] = useState("");
+  const [companyId, setCompanyId] = useState("");
+  const [customerId, setCustomerId] = useState("");
   const [notes, setNotes] = useState("");
   const [remaining, setRemaining] = useState<number | null>(null);
   const [selected, setSelected] = useState<MenuDrink | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [done, setDone] = useState<Done | null>(null);
 
-  const whoComplete = company.trim().length >= 2 && name.trim().length >= 2;
+  // Si la barra edita la lista mientras alguien elige, una selección que ya no existe cuenta como vacía
+  const company = companies.find((c) => c.id === companyId);
+  const employee = company?.employees.find((e) => e.id === customerId);
+  const whoComplete = !!employee;
 
   const reset = useCallback(() => {
-    setCompany("");
-    setName("");
+    setCompanyId("");
+    setCustomerId("");
     setNotes("");
     setRemaining(null);
     setSelected(null);
@@ -52,22 +56,21 @@ export function Kiosk({
     setDone(null);
   }, []);
 
-  // Cupo restante: se consulta al terminar de escribir
+  // Cupo restante: se consulta al elegir el nombre
+  const employeeId = employee?.id;
   useEffect(() => {
-    if (!whoComplete) return;
+    if (!employeeId) return;
     let alive = true;
-    const t = setTimeout(async () => {
-      const r = await checkAllowance({ company, name });
-      if (alive && !("fieldErrors" in r)) setRemaining(r.remaining);
-    }, 350);
+    checkAllowance(employeeId).then((r) => {
+      if (alive) setRemaining(r.remaining);
+    });
     return () => {
       alive = false;
-      clearTimeout(t);
     };
-  }, [company, name, whoComplete]);
+  }, [employeeId]);
 
   // Reinicio por inactividad
-  const dirty = company !== "" || name !== "" || notes !== "" || selected !== null;
+  const dirty = companyId !== "" || customerId !== "" || notes !== "" || selected !== null;
   useEffect(() => {
     if (!dirty || done) return;
     let t = setTimeout(reset, IDLE_RESET_MS);
@@ -94,14 +97,15 @@ export function Kiosk({
       key={done?.orderId ?? "form"}
       companies={companies}
       company={company}
-      name={name}
+      employee={employee}
       notes={notes}
       onCompany={(v) => {
-        setCompany(v);
+        setCompanyId(v);
+        setCustomerId("");
         setRemaining(null);
       }}
-      onName={(v) => {
-        setName(v);
+      onEmployee={(v) => {
+        setCustomerId(v);
         setRemaining(null);
       }}
       onNotes={setNotes}
@@ -110,9 +114,9 @@ export function Kiosk({
       drink={selected}
       showDrink={wide}
       onPlaced={(orderId, rem) => {
-        if (!selected) return;
+        if (!selected || !employee) return;
         setSheetOpen(false);
-        setDone({ orderId, drink: selected, name: name.trim().split(" ")[0], remaining: rem });
+        setDone({ orderId, drink: selected, name: employee.name.split(" ")[0], remaining: rem });
       }}
     />
   );
@@ -127,7 +131,7 @@ export function Kiosk({
               ¿Qué se te antoja?
             </h1>
             <p className="mt-2 text-[17px] text-ink-2">
-              Elige tu bebida, escribe tu nombre y la recoges en la barra.
+              Elige tu bebida y tu nombre, y la recoges en la barra.
             </p>
           </div>
           <MenuGrid drinks={drinks} selectedId={wide ? selected?.id : undefined} onPick={pick} />
@@ -169,10 +173,10 @@ export function Kiosk({
 function OrderForm({
   companies,
   company,
-  name,
+  employee,
   notes,
   onCompany,
-  onName,
+  onEmployee,
   onNotes,
   remaining,
   limit,
@@ -180,12 +184,12 @@ function OrderForm({
   showDrink,
   onPlaced,
 }: {
-  companies: string[];
-  company: string;
-  name: string;
+  companies: KioskCompany[];
+  company: KioskCompany | undefined;
+  employee: { id: string; name: string } | undefined;
   notes: string;
   onCompany: (v: string) => void;
-  onName: (v: string) => void;
+  onEmployee: (v: string) => void;
   onNotes: (v: string) => void;
   remaining: number | null;
   limit: number;
@@ -194,17 +198,22 @@ function OrderForm({
   onPlaced: (orderId: string, remaining: number) => void;
 }) {
   const [pending, run] = useAction();
-  const whoComplete = company.trim().length >= 2 && name.trim().length >= 2;
-  const blocked = !whoComplete ? "Escribe tu compañía y tu nombre" : !drink ? "Elige una bebida del menú" : remaining === 0 ? "Ya usaste tus bebidas de hoy. Mañana se renueva." : null;
+  const blocked = companies.length === 0
+    ? "Todavía no hay compañías registradas. Pide ayuda en la barra."
+    : !company
+      ? "Elige tu compañía"
+      : !employee
+        ? "Elige tu nombre"
+        : !drink ? "Elige una bebida del menú" : remaining === 0 ? "Ya usaste tus bebidas de hoy. Mañana se renueva." : null;
 
   return (
     <form
       className="flex flex-col gap-5"
       onSubmit={(e) => {
         e.preventDefault();
-        if (blocked || !drink) return;
+        if (blocked || !drink || !employee) return;
         run(
-          () => placeOrder({ company, name, drinkId: drink.id, notes }),
+          () => placeOrder({ customerId: employee.id, drinkId: drink.id, notes }),
           (r) => {
             const res = r as Awaited<ReturnType<typeof placeOrder>>;
             if (res.ok && res.orderId) onPlaced(res.orderId, res.remaining ?? 0);
@@ -213,11 +222,23 @@ function OrderForm({
       }}
     >
       <div className="flex flex-col gap-3">
-        <GroupedFields
-          companies={companies}
+        <GroupedSelects
           rows={[
-            { label: "Compañía", value: company, onChange: onCompany, autoComplete: "organization", placeholder: "Dónde trabajas", list: true },
-            { label: "Nombre", value: name, onChange: onName, autoComplete: "name", placeholder: "Nombre y apellido" },
+            {
+              label: "Compañía",
+              value: company?.id ?? "",
+              onChange: onCompany,
+              placeholder: "Dónde trabajas",
+              options: companies,
+            },
+            {
+              label: "Nombre",
+              value: employee?.id ?? "",
+              onChange: onEmployee,
+              placeholder: company ? "Busca tu nombre" : "Primero tu compañía",
+              options: company?.employees ?? [],
+              disabled: !company,
+            },
           ]}
         />
         <Allowance remaining={remaining} limit={limit} />
@@ -252,51 +273,49 @@ function OrderForm({
   );
 }
 
-function GroupedFields({
+function GroupedSelects({
   rows,
-  companies,
 }: {
-  companies: string[];
   rows: {
     label: string;
     value: string;
     onChange: (v: string) => void;
-    autoComplete: string;
     placeholder: string;
-    list?: boolean;
+    options: { id: string; name: string }[];
+    disabled?: boolean;
   }[];
 }) {
   return (
-    // Campos agrupados como en Ajustes de iOS: un solo contenedor, separadores con sangría
+    // Campos agrupados como en Ajustes de iOS: un solo contenedor, separadores con sangría.
+    // <select> nativo: en el iPad abre la rueda del sistema, cómoda para listas largas.
     <div className="overflow-hidden rounded-2xl bg-surface-2 focus-within:ring-2 focus-within:ring-accent">
       {rows.map((r, i) => (
         <div key={r.label}>
           {i > 0 && <div className="ml-4 h-px bg-line" />}
-          <label className="flex h-[52px] items-center gap-3 px-4">
+          <label className={cn("relative flex h-[52px] items-center gap-3 px-4", r.disabled && "opacity-50")}>
             <span className="w-[5.25rem] shrink-0 text-[15px] text-ink">{r.label}</span>
-            <input
+            <select
               value={r.value}
               onChange={(e) => r.onChange(e.target.value)}
-              list={r.list && companies.length ? "kiosk-companies" : undefined}
-              autoComplete={r.autoComplete}
-              autoCapitalize="words"
-              autoCorrect="off"
-              spellCheck={false}
-              enterKeyHint="next"
-              maxLength={60}
-              placeholder={r.placeholder}
-              className="h-full min-w-0 flex-1 bg-transparent text-[17px] text-ink outline-none placeholder:text-ink-2 focus-visible:outline-none"
-            />
+              disabled={r.disabled}
+              className={cn(
+                "h-full min-w-0 flex-1 appearance-none truncate bg-transparent pr-7 text-[17px] outline-none focus-visible:outline-none disabled:cursor-not-allowed",
+                r.value ? "text-ink" : "text-ink-2",
+              )}
+            >
+              <option value="" disabled>
+                {r.placeholder}
+              </option>
+              {r.options.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+            <CaretUpDownIcon className="pointer-events-none absolute right-4 size-4 text-ink-2" aria-hidden />
           </label>
         </div>
       ))}
-      {companies.length > 0 && (
-        <datalist id="kiosk-companies">
-          {companies.map((c) => (
-            <option key={c} value={c} />
-          ))}
-        </datalist>
-      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, useReducedMotion } from "motion/react";
 import {
+  BuildingsIcon,
   ChartBarIcon,
   ClipboardTextIcon,
   CoffeeIcon,
@@ -17,6 +18,7 @@ const ADMIN_LINKS: { href: string; label: string; icon: Icon }[] = [
   { href: "/admin", label: "Barra", icon: ClipboardTextIcon },
   { href: "/admin/menu", label: "Menú", icon: CoffeeIcon },
   { href: "/admin/inventario", label: "Ingredientes", icon: PackageIcon },
+  { href: "/admin/consumidores", label: "Compañías", icon: BuildingsIcon },
   { href: "/admin/reporte", label: "Reporte", icon: ChartBarIcon },
   { href: "/admin/usuarios", label: "Personas", icon: UsersThreeIcon },
 ];
@@ -64,7 +66,7 @@ export function AdminTabBar() {
       aria-label="Administración"
       className="glass no-print fixed inset-x-0 bottom-0 z-40 border-t border-line pb-[env(safe-area-inset-bottom)] md:hidden"
     >
-      <ul className="grid grid-cols-5">
+      <ul className="grid grid-cols-6">
         {ADMIN_LINKS.map((l) => {
           const active = isActive(path, l.href);
           const I = l.icon;

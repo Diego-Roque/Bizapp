@@ -18,11 +18,14 @@ async function KioskContent() {
   const today = dayKey();
   const [menu, companies, ready] = await Promise.all([
     getMenu(),
-    db.customer.findMany({
-      distinct: ["company"],
-      orderBy: { lastSeenAt: "desc" },
-      take: 60,
-      select: { company: true },
+    db.company.findMany({
+      where: { deletedAt: null, employees: { some: { deletedAt: null } } },
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true,
+        employees: { where: { deletedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true } },
+      },
     }),
     db.order.findMany({
       where: { dayKey: today, status: "READY" },
@@ -38,7 +41,7 @@ async function KioskContent() {
         today={todayLabel()}
         limit={DAILY_DRINK_LIMIT}
         drinks={menu}
-        companies={companies.map((c) => c.company)}
+        companies={companies}
         ready={ready.map((o) => ({ id: o.id, name: o.customer.name, drink: o.drink.name }))}
       />
     </>

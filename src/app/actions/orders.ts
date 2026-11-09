@@ -5,7 +5,6 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/dal";
 import { DAILY_DRINK_LIMIT } from "@/lib/config";
-import { customerKey, tidy } from "@/lib/customer";
 import { dayKey } from "@/lib/day";
 import { num } from "@/lib/format";
 import type { OrderStatus } from "@/generated/prisma/enums";
@@ -13,27 +12,21 @@ import type { ActionState } from "./types";
 
 class UserFacingError extends Error {}
 
-const who = z.object({
-  company: z.string().transform(tidy).pipe(z.string().min(2, "Escribe tu compañía").max(60)),
-  name: z.string().transform(tidy).pipe(z.string().min(2, "Escribe tu nombre").max(60)),
-});
+/** Empleado vigente de una compañía vigente: solo ellos pueden pedir */
+function activeEmployee(customerId: string) {
+  return { id: customerId, deletedAt: null, company: { deletedAt: null } };
+}
 
 /** Cuántas bebidas le quedan hoy a esta persona (kiosco, sin login) */
-export async function checkAllowance(input: { company: string; name: string }) {
-  const parsed = who.safeParse(input);
-  if (!parsed.success) {
-    const fieldErrors: Record<string, string> = {};
-    for (const i of parsed.error.issues) fieldErrors[String(i.path[0])] ??= i.message;
-    return { fieldErrors, remaining: 0, limit: DAILY_DRINK_LIMIT };
-  }
-  const key = customerKey(parsed.data.company, parsed.data.name);
+export async function checkAllowance(customerId: string) {
   const used = await db.order.count({
-    where: { customer: { key }, dayKey: dayKey(), status: { not: "CANCELLED" } },
+    where: { customer: activeEmployee(customerId), dayKey: dayKey(), status: { not: "CANCELLED" } },
   });
   return { remaining: Math.max(0, DAILY_DRINK_LIMIT - used), limit: DAILY_DRINK_LIMIT };
 }
 
-const placeSchema = who.extend({
+const placeSchema = z.object({
+  customerId: z.string().min(1, "Elige tu nombre"),
   drinkId: z.string().min(1),
   notes: z.string().trim().max(200).optional(),
 });
@@ -43,24 +36,19 @@ export type PlaceResult = ActionState & { orderId?: string; remaining?: number }
 export async function placeOrder(input: z.input<typeof placeSchema>): Promise<PlaceResult> {
   const parsed = placeSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Pedido inválido" };
-  const { company, name, drinkId, notes } = parsed.data;
-  const key = customerKey(company, name);
+  const { customerId, drinkId, notes } = parsed.data;
   const today = dayKey();
 
   try {
     const { orderId, used } = await db.$transaction(async (tx) => {
       // Serializa los pedidos de esta persona en este día: dos toques rápidos no saltan el límite
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${key}:${today}`}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${customerId}:${today}`}))`;
 
-      const customer = await tx.customer.upsert({
-        where: { key },
-        // Conserva cómo se escribió la primera vez (con acentos y mayúsculas)
-        update: { lastSeenAt: new Date() },
-        create: { key, company, name },
-      });
+      const seen = await tx.customer.updateMany({ where: activeEmployee(customerId), data: { lastSeenAt: new Date() } });
+      if (seen.count === 0) throw new UserFacingError("Ya no apareces en la lista. Pide ayuda en la barra.");
 
       const used = await tx.order.count({
-        where: { customerId: customer.id, dayKey: today, status: { not: "CANCELLED" } },
+        where: { customerId, dayKey: today, status: { not: "CANCELLED" } },
       });
       if (used >= DAILY_DRINK_LIMIT) {
         throw new UserFacingError(`Ya pediste tus ${DAILY_DRINK_LIMIT} bebidas de hoy. Mañana hay más.`);
@@ -76,7 +64,7 @@ export async function placeOrder(input: z.input<typeof placeSchema>): Promise<Pl
       }
 
       const order = await tx.order.create({
-        data: { customerId: customer.id, drinkId: drink.id, dayKey: today, notes: notes || null },
+        data: { customerId, drinkId: drink.id, dayKey: today, notes: notes || null },
       });
       return { orderId: order.id, used: used + 1 };
     });
