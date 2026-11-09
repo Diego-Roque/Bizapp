@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { BellRingingIcon, BuildingsIcon, CheckIcon, MagnifyingGlassIcon, PintGlassIcon } from "@phosphor-icons/react";
+import { BellRingingIcon, XCircleIcon, BuildingsIcon, CheckIcon, MagnifyingGlassIcon, PintGlassIcon } from "@phosphor-icons/react";
 import { checkAllowance, placeOrder, undoOrder } from "@/app/actions/orders";
 import type { MenuDrink } from "@/lib/menu";
 import { nameKey } from "@/lib/customer";
@@ -37,6 +37,7 @@ export function Kiosk({
   const [companyId, setCompanyId] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [notes, setNotes] = useState("");
+  const [query, setQuery] = useState("");
   const [remaining, setRemaining] = useState<number | null>(null);
   const [selected, setSelected] = useState<MenuDrink | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -51,6 +52,7 @@ export function Kiosk({
     setCompanyId("");
     setCustomerId("");
     setNotes("");
+    setQuery("");
     setRemaining(null);
     setSelected(null);
     setSheetOpen(false);
@@ -71,7 +73,7 @@ export function Kiosk({
   }, [employeeId]);
 
   // Reinicio por inactividad
-  const dirty = companyId !== "" || customerId !== "" || notes !== "" || selected !== null;
+  const dirty = companyId !== "" || customerId !== "" || notes !== "" || query !== "" || selected !== null;
   useEffect(() => {
     if (!dirty || done) return;
     let t = setTimeout(reset, IDLE_RESET_MS);
@@ -135,7 +137,7 @@ export function Kiosk({
               Elige tu bebida y tu nombre, y la recoges en la barra.
             </p>
           </div>
-          <MenuGrid drinks={drinks} selectedId={wide ? selected?.id : undefined} onPick={pick} />
+          <MenuGrid drinks={drinks} query={query} onQuery={setQuery} selectedId={wide ? selected?.id : undefined} onPick={pick} />
         </section>
 
         {wide && (
@@ -539,19 +541,72 @@ function SelectedDrink({ drink }: { drink: MenuDrink | null }) {
 
 /* ---------- Menú ---------- */
 
+function MenuSearch({ value, onChange, count }: { value: string; onChange: (v: string) => void; count: number | null }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="relative w-full max-w-md">
+        <MagnifyingGlassIcon className="pointer-events-none absolute top-1/2 left-4 size-[18px] -translate-y-1/2 text-ink-2" />
+        <input
+          type="search"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") onChange("");
+            // En el iPad, Buscar cierra el teclado para ver los resultados completos
+            if (e.key === "Enter") e.currentTarget.blur();
+          }}
+          placeholder="Buscar bebida"
+          aria-label="Buscar bebida"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          enterKeyHint="search"
+          className="h-12 w-full rounded-full bg-surface-2 pr-12 pl-11 text-[17px] text-ink outline-none placeholder:text-ink-2 focus:ring-2 focus:ring-accent [&::-webkit-search-cancel-button]:hidden"
+        />
+        {value && (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            aria-label="Borrar búsqueda"
+            className="pressable absolute top-1/2 right-2 grid size-9 -translate-y-1/2 place-items-center rounded-full text-ink-2 hover:text-ink"
+          >
+            <XCircleIcon className="size-5" weight="fill" />
+          </button>
+        )}
+      </div>
+      <p className="shrink-0 text-[14px] text-ink-2 tabular-nums" aria-live="polite">
+        {count == null ? "" : count === 1 ? "1 resultado" : `${count} resultados`}
+      </p>
+    </div>
+  );
+}
+
 function MenuGrid({
   drinks,
+  query,
+  onQuery,
   selectedId,
   onPick,
 }: {
   drinks: MenuDrink[];
+  query: string;
+  onQuery: (q: string) => void;
   selectedId?: string;
   onPick: (d: MenuDrink) => void;
 }) {
   const [category, setCategory] = useState("Todo");
   const reduce = useReducedMotion();
   const categories = useMemo(() => ["Todo", ...new Set(drinks.map((d) => d.category))], [drinks]);
-  const visible = category === "Todo" ? drinks : drinks.filter((d) => d.category === category);
+  // Índice sin acentos: "pina" encuentra "Piña colada", "frio" encuentra todo "Café frío"
+  const index = useMemo(() => drinks.map((d) => nameKey(`${d.name} ${d.category}`)), [drinks]);
+  const needle = nameKey(query);
+  const searching = needle.length > 0;
+  // Buscar recorre todo el menú; la pestaña elegida se respeta solo sin búsqueda
+  const visible = searching
+    ? drinks.filter((_, i) => index[i].includes(needle))
+    : category === "Todo"
+      ? drinks
+      : drinks.filter((d) => d.category === category);
 
   if (drinks.length === 0) {
     return (
@@ -565,6 +620,7 @@ function MenuGrid({
 
   return (
     <>
+      <MenuSearch value={query} onChange={onQuery} count={searching && visible.length > 0 ? visible.length : null} />
       {categories.length > 2 && (
         <div className="no-scrollbar -mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
           {/* Control segmentado estilo iOS */}
@@ -573,14 +629,17 @@ function MenuGrid({
               <button
                 key={c}
                 role="tab"
-                aria-selected={category === c}
-                onClick={() => setCategory(c)}
+                aria-selected={!searching && category === c}
+                onClick={() => {
+                  setCategory(c);
+                  onQuery("");
+                }}
                 className={cn(
                   "relative shrink-0 rounded-full px-4 py-1.5 text-[15px] font-medium whitespace-nowrap transition-colors",
-                  category === c ? "text-ink" : "text-ink-2 hover:text-ink",
+                  !searching && category === c ? "text-ink" : "text-ink-2 hover:text-ink",
                 )}
               >
-                {category === c && (
+                {!searching && category === c && (
                   <motion.span
                     layoutId="seg"
                     className="absolute inset-0 rounded-full bg-surface shadow-card"
@@ -592,6 +651,18 @@ function MenuGrid({
             ))}
           </div>
         </div>
+      )}
+      {searching && visible.length === 0 && (
+        <EmptyState
+          icon={<MagnifyingGlassIcon className="size-6" />}
+          title={`No encontramos “${query.trim()}”`}
+          body="Prueba con otra palabra, por ejemplo “latte”, “iced” o “mezcal”."
+          action={
+            <Button variant="secondary" onClick={() => onQuery("")}>
+              Ver todo el menú
+            </Button>
+          }
+        />
       )}
       <ul className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 xl:grid-cols-4">
         {visible.map((d, i) => {
