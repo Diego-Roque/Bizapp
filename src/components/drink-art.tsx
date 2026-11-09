@@ -2,12 +2,15 @@
 
 import {
   BeerBottleIcon,
+  BrandyIcon,
   CoffeeIcon,
   DropIcon,
   LeafIcon,
   MartiniIcon,
   OrangeIcon,
+  OrangeSliceIcon,
   PintGlassIcon,
+  SnowflakeIcon,
   WineIcon,
   type IconProps,
 } from "@phosphor-icons/react";
@@ -18,8 +21,14 @@ export function CategoryIcon({ category, className, weight }: { category: string
   switch (category) {
     case "Café":
       return <CoffeeIcon {...p} />;
+    case "Café frío":
+      return <SnowflakeIcon {...p} />;
     case "Té":
       return <LeafIcon {...p} />;
+    case "Refresher":
+      return <OrangeSliceIcon {...p} />;
+    case "Destilado":
+      return <BrandyIcon {...p} />;
     case "Agua":
       return <DropIcon {...p} />;
     case "Jugo":
@@ -39,7 +48,10 @@ export function CategoryIcon({ category, className, weight }: { category: string
 // Cada categoría tiene el color de lo que hay en el vaso. Decorativo: la identidad la da el nombre.
 const TINTS: Record<string, [string, string]> = {
   Café: ["#a8734f", "#5b3522"],
+  "Café frío": ["#c9a184", "#6e4a33"],
   Té: ["#9cc26f", "#4d7a34"],
+  Refresher: ["#ff8a7a", "#d6336c"],
+  Destilado: ["#e0a85a", "#8a4f14"],
   Refresco: ["#ef6a5b", "#a8261d"],
   Agua: ["#7cc4f5", "#2a74c2"],
   Jugo: ["#ffbf4d", "#e5720f"],

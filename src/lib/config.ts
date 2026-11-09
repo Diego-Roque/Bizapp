@@ -4,13 +4,16 @@ export const ALLOWED_EMAIL_DOMAIN = (process.env.ALLOWED_EMAIL_DOMAIN || "").tri
 
 export const DRINK_CATEGORIES = [
   "Café",
+  "Café frío",
   "Té",
+  "Refresher",
   "Refresco",
   "Agua",
   "Jugo",
   "Cerveza",
   "Vino",
   "Coctel",
+  "Destilado",
   "Mocktail",
 ] as const;
 
