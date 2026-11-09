@@ -1,7 +1,8 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
-import { BuildingsIcon, MagnifyingGlassIcon, PencilSimpleIcon, PlusIcon, TrashIcon, UserPlusIcon } from "@phosphor-icons/react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { BuildingsIcon, ListPlusIcon, MagnifyingGlassIcon, PencilSimpleIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { addEmployees, deleteCompany, deleteEmployee, saveCompany, updateEmployee } from "@/app/actions/companies";
 import { initialState } from "@/app/actions/types";
 import { Sheet } from "@/components/sheet";
@@ -101,10 +102,10 @@ export function CompaniesManager({ companies }: { companies: Company[] }) {
               ? "Editar compañía"
               : "Nueva compañía"
             : editor?.kind === "add"
-              ? "Agregar empleados"
+              ? "Agregar varios empleados"
               : "Editar empleado"
         }
-        description={editor?.kind === "add" ? "Escribe un nombre por renglón para agregar a varios de una vez." : undefined}
+        description={editor?.kind === "add" ? "Pega o escribe un nombre por renglón. Los que ya estén se omiten." : undefined}
       >
         {editor?.kind === "company" && <CompanyForm key={session} company={editor.company} onClose={() => setOpen(false)} />}
         {editor?.kind === "add" && (
@@ -126,6 +127,11 @@ export function CompaniesManager({ companies }: { companies: Company[] }) {
 
 /* ---------- Tarjeta por compañía ---------- */
 
+function initials(name: string) {
+  const [a = "", b = ""] = name.split(" ");
+  return (a[0] ?? "").concat(b[0] ?? "").toUpperCase();
+}
+
 function CompanyCard({
   company,
   shown,
@@ -139,45 +145,140 @@ function CompanyCard({
   onAdd: () => void;
   onEditEmployee: (e: Employee) => void;
 }) {
+  const reduce = useReducedMotion();
   const n = company.employees.length;
   return (
     <section aria-label={company.name} className="overflow-hidden rounded-[20px] bg-surface shadow-card">
-      <div className="flex items-center gap-2 px-4 pt-4 pb-3">
+      <div className="flex items-center gap-1 py-3 pr-2 pl-4">
         <div className="min-w-0 flex-1">
-          <h2 className="truncate font-semibold text-ink">{company.name}</h2>
-          <p className="text-[13px] text-ink-2">
-            {n === 0 ? "Sin empleados: no aparece en el kiosco" : `${n} ${n === 1 ? "empleado" : "empleados"}`}
+          <h2 className="truncate text-[17px] font-semibold tracking-[-0.01em] text-ink">{company.name}</h2>
+          <p className={cn("text-[13px]", n === 0 ? "text-warn" : "text-ink-2")}>
+            {n === 0 ? "Sin empleados: aún no aparece en el kiosco" : `${n} ${n === 1 ? "empleado" : "empleados"}`}
           </p>
         </div>
-        <Button variant="secondary" size="sm" onClick={onAdd} aria-label={`Agregar empleados a ${company.name}`}>
-          <UserPlusIcon className="size-4" />
-          <span className="hidden sm:inline">Agregar</span>
+        <Button variant="ghost" size="sm" onClick={onAdd} aria-label={`Agregar varios empleados a ${company.name}`}>
+          <ListPlusIcon className="size-4" />
         </Button>
-        <Button variant="ghost" size="sm" onClick={onEdit} aria-label={`Editar ${company.name}`}>
+        <Button variant="ghost" size="sm" onClick={onEdit} aria-label={`Renombrar ${company.name}`}>
           <PencilSimpleIcon className="size-4" />
         </Button>
-        <ConfirmDelete label={`Eliminar ${company.name}`} action={() => deleteCompany(company.id)} />
+        <ConfirmDelete
+          label={`Eliminar ${company.name}`}
+          confirmLabel={n > 0 ? `Eliminar con ${n}` : "Confirmar"}
+          action={() => deleteCompany(company.id)}
+        />
       </div>
-      {shown.length > 0 && (
-        <ul className="divide-y divide-line border-t border-line">
+
+      <ul className="border-t border-line">
+        <AnimatePresence initial={false}>
           {shown.map((e) => (
-            <li key={e.id} className="flex items-center gap-2 py-1.5 pr-2 pl-4 text-[15px]">
-              <span className="min-w-0 flex-1 truncate text-ink">{e.name}</span>
-              {e.today > 0 && <Badge tone="accent">Hoy {e.today}</Badge>}
-              <Button variant="ghost" size="sm" onClick={() => onEditEmployee(e)} aria-label={`Editar ${e.name}`}>
-                <PencilSimpleIcon className="size-4" />
-              </Button>
-              <ConfirmDelete label={`Eliminar ${e.name}`} action={() => deleteEmployee(e.id)} />
-            </li>
+            <motion.li
+              key={e.id}
+              layout={!reduce}
+              initial={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }}
+              transition={{ type: "spring", bounce: 0, duration: 0.3 }}
+              className="overflow-hidden"
+            >
+              <div className="flex items-center gap-3 py-1.5 pr-2 pl-4 text-[15px]">
+                <span
+                  aria-hidden
+                  className="grid size-7 shrink-0 place-items-center rounded-full bg-surface-2 text-[12px] font-semibold text-ink-2"
+                >
+                  {initials(e.name)}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-ink">{e.name}</span>
+                {e.today > 0 && <Badge tone="accent">Hoy {e.today}</Badge>}
+                <Button variant="ghost" size="sm" onClick={() => onEditEmployee(e)} aria-label={`Editar ${e.name}`}>
+                  <PencilSimpleIcon className="size-4" />
+                </Button>
+                <ConfirmDelete label={`Eliminar ${e.name}`} action={() => deleteEmployee(e.id)} />
+              </div>
+            </motion.li>
           ))}
-        </ul>
-      )}
+        </AnimatePresence>
+      </ul>
+
+      <QuickAdd companyId={company.id} companyName={company.name} first={n === 0} />
     </section>
   );
 }
 
+/** Alta de uno en uno sin salir de la tarjeta: Enter agrega y el foco se queda para el siguiente */
+function QuickAdd({ companyId, companyName, first }: { companyId: string; companyName: string; first: boolean }) {
+  const [pending, run] = useAction();
+  const [value, setValue] = useState("");
+  const [error, setError] = useState<string>();
+  const input = useRef<HTMLInputElement>(null);
+
+  function submit() {
+    if (!value.trim() || pending) return;
+    const fd = new FormData();
+    fd.set("companyId", companyId);
+    fd.set("names", value);
+    run(
+      () => addEmployees(initialState, fd),
+      (r) => {
+        if (r.ok) {
+          setValue("");
+          setError(undefined);
+          input.current?.focus();
+        } else setError(r.fieldErrors?.names ?? r.fieldErrors?.companyId);
+      },
+    );
+  }
+
+  return (
+    <form
+      className="border-t border-line px-4 py-2.5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <div className="flex items-center gap-3">
+        <PlusIcon className="size-4 shrink-0 text-accent" weight="bold" aria-hidden />
+        <input
+          ref={input}
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(undefined);
+          }}
+          maxLength={60}
+          autoComplete="off"
+          enterKeyHint="done"
+          placeholder={first ? "Agrega el primer empleado" : "Agregar empleado"}
+          aria-label={`Agregar empleado a ${companyName}`}
+          aria-invalid={!!error}
+          className="h-9 min-w-0 flex-1 bg-transparent text-[15px] text-ink outline-none placeholder:text-ink-2"
+        />
+        {value.trim() && (
+          <Button type="submit" size="sm" disabled={pending}>
+            {pending ? "Agregando" : "Agregar"}
+          </Button>
+        )}
+      </div>
+      {error && (
+        <p role="alert" className="pt-1 pl-7 text-[13px] text-danger">
+          {error}
+        </p>
+      )}
+    </form>
+  );
+}
+
 /** Basurero de dos toques: el primero arma, el segundo elimina; se desarma solo */
-function ConfirmDelete({ label, action }: { label: string; action: () => Promise<{ error?: string }> }) {
+function ConfirmDelete({
+  label,
+  confirmLabel = "Confirmar",
+  action,
+}: {
+  label: string;
+  confirmLabel?: string;
+  action: () => Promise<{ error?: string }>;
+}) {
   const [pending, run] = useAction();
   const [confirming, setConfirming] = useState(false);
 
@@ -189,7 +290,7 @@ function ConfirmDelete({ label, action }: { label: string; action: () => Promise
 
   return confirming ? (
     <Button variant="danger" size="sm" disabled={pending} onClick={() => run(action)}>
-      Confirmar
+      {confirmLabel}
     </Button>
   ) : (
     <Button variant="ghost" size="sm" onClick={() => setConfirming(true)} aria-label={label}>

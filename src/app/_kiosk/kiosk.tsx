@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { BellRingingIcon, CaretUpDownIcon, CheckIcon, MagnifyingGlassIcon, PintGlassIcon } from "@phosphor-icons/react";
+import { BellRingingIcon, BuildingsIcon, CheckIcon, MagnifyingGlassIcon, PintGlassIcon } from "@phosphor-icons/react";
 import { checkAllowance, placeOrder, undoOrder } from "@/app/actions/orders";
 import type { MenuDrink } from "@/lib/menu";
+import { nameKey } from "@/lib/customer";
 import { DrinkArt } from "@/components/drink-art";
 import { Sheet } from "@/components/sheet";
 import { useAction } from "@/components/toaster";
@@ -222,24 +223,12 @@ function OrderForm({
       }}
     >
       <div className="flex flex-col gap-3">
-        <GroupedSelects
-          rows={[
-            {
-              label: "Compañía",
-              value: company?.id ?? "",
-              onChange: onCompany,
-              placeholder: "Dónde trabajas",
-              options: companies,
-            },
-            {
-              label: "Nombre",
-              value: employee?.id ?? "",
-              onChange: onEmployee,
-              placeholder: company ? "Busca tu nombre" : "Primero tu compañía",
-              options: company?.employees ?? [],
-              disabled: !company,
-            },
-          ]}
+        <WhoPicker
+          companies={companies}
+          company={company}
+          employee={employee}
+          onCompany={onCompany}
+          onEmployee={onEmployee}
         />
         <Allowance remaining={remaining} limit={limit} />
       </div>
@@ -273,49 +262,201 @@ function OrderForm({
   );
 }
 
-function GroupedSelects({
-  rows,
+/* ---------- ¿Quién pide? Compañía y luego nombre, en línea y por pasos ---------- */
+
+const SEARCH_FROM = 7; // con pocas personas, buscar estorba más de lo que ayuda
+
+function initials(name: string) {
+  const [a = "", b = ""] = name.split(" ");
+  return (a[0] ?? "").concat(b[0] ?? "").toUpperCase();
+}
+
+function WhoPicker({
+  companies,
+  company,
+  employee,
+  onCompany,
+  onEmployee,
 }: {
-  rows: {
-    label: string;
-    value: string;
-    onChange: (v: string) => void;
-    placeholder: string;
-    options: { id: string; name: string }[];
-    disabled?: boolean;
-  }[];
+  companies: KioskCompany[];
+  company: KioskCompany | undefined;
+  employee: { id: string; name: string } | undefined;
+  onCompany: (v: string) => void;
+  onEmployee: (v: string) => void;
+}) {
+  const reduce = useReducedMotion();
+  const step = !company ? "company" : !employee ? "employee" : "done";
+  // Entra desde abajo y sale hacia arriba: el flujo avanza en una sola dirección
+  const swap = {
+    initial: reduce ? { opacity: 0 } : { opacity: 0, y: 10 },
+    animate: { opacity: 1, y: 0 },
+    exit: reduce ? { opacity: 0 } : { opacity: 0, y: -6 },
+    transition: { type: "spring" as const, bounce: 0, duration: 0.32 },
+  };
+
+  if (companies.length === 0) {
+    return (
+      <div className="flex items-center gap-3 rounded-2xl bg-surface-2 px-4 py-4 text-[15px] text-ink-2">
+        <BuildingsIcon className="size-5 shrink-0" />
+        Todavía no hay compañías registradas.
+      </div>
+    );
+  }
+
+  return (
+    <motion.div layout={!reduce} transition={swap.transition} className="flex flex-col gap-3">
+      {company && (
+        <motion.div layout={!reduce} transition={swap.transition} className="overflow-hidden rounded-2xl bg-surface-2">
+          <SummaryRow label="Compañía" value={company.name} onChange={() => onCompany("")} />
+          {employee && (
+            <>
+              <div className="ml-4 h-px bg-line" />
+              <SummaryRow label="Nombre" value={employee.name} onChange={() => onEmployee("")} />
+            </>
+          )}
+        </motion.div>
+      )}
+
+      <AnimatePresence mode="popLayout" initial={false}>
+        {step === "company" && (
+          <motion.div key="company" {...swap}>
+            <CompanyStep companies={companies} onPick={onCompany} />
+          </motion.div>
+        )}
+        {step === "employee" && company && (
+          <motion.div key={`employee-${company.id}`} {...swap}>
+            <EmployeeStep company={company} onPick={onEmployee} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+function SummaryRow({ label, value, onChange }: { label: string; value: string; onChange: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onChange}
+      className="pressable flex h-[56px] w-full items-center gap-3 px-4 text-left"
+      aria-label={`${label}: ${value}. Toca para cambiar`}
+    >
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="text-[12px] leading-4 text-ink-2">{label}</span>
+        <span className="truncate text-[17px] leading-6 font-medium tracking-[-0.01em] text-ink">{value}</span>
+      </span>
+      <span className="shrink-0 text-[15px] font-medium text-accent">Cambiar</span>
+    </button>
+  );
+}
+
+function StepTitle({ children }: { children: string }) {
+  return <p className="px-1 pb-2 text-[15px] font-semibold text-ink">{children}</p>;
+}
+
+function SearchField({
+  value,
+  onChange,
+  placeholder,
+  onEnter,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  onEnter: () => void;
 }) {
   return (
-    // Campos agrupados como en Ajustes de iOS: un solo contenedor, separadores con sangría.
-    // <select> nativo: en el iPad abre la rueda del sistema, cómoda para listas largas.
-    <div className="overflow-hidden rounded-2xl bg-surface-2 focus-within:ring-2 focus-within:ring-accent">
-      {rows.map((r, i) => (
-        <div key={r.label}>
-          {i > 0 && <div className="ml-4 h-px bg-line" />}
-          <label className={cn("relative flex h-[52px] items-center gap-3 px-4", r.disabled && "opacity-50")}>
-            <span className="w-[5.25rem] shrink-0 text-[15px] text-ink">{r.label}</span>
-            <select
-              value={r.value}
-              onChange={(e) => r.onChange(e.target.value)}
-              disabled={r.disabled}
-              className={cn(
-                "h-full min-w-0 flex-1 appearance-none truncate bg-transparent pr-7 text-[17px] outline-none focus-visible:outline-none disabled:cursor-not-allowed",
-                r.value ? "text-ink" : "text-ink-2",
-              )}
+    <div className="relative mb-2">
+      <MagnifyingGlassIcon className="pointer-events-none absolute top-1/2 left-3.5 size-[18px] -translate-y-1/2 text-ink-2" />
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault(); // no envía el pedido: elige el único resultado
+          onEnter();
+        }}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+        enterKeyHint="go"
+        className="h-11 w-full rounded-xl bg-surface-2 pr-3 pl-10 text-[16px] text-ink outline-none placeholder:text-ink-2 focus:ring-2 focus:ring-accent"
+      />
+    </div>
+  );
+}
+
+function useFiltered<T extends { name: string }>(items: T[], q: string) {
+  return useMemo(() => {
+    const needle = nameKey(q);
+    return needle ? items.filter((i) => nameKey(i.name).includes(needle)) : items;
+  }, [items, q]);
+}
+
+function CompanyStep({ companies, onPick }: { companies: KioskCompany[]; onPick: (id: string) => void }) {
+  const [q, setQ] = useState("");
+  const list = useFiltered(companies, q);
+  return (
+    <div>
+      <StepTitle>¿De qué compañía eres?</StepTitle>
+      {companies.length >= SEARCH_FROM && (
+        <SearchField value={q} onChange={setQ} placeholder="Buscar compañía" onEnter={() => list.length === 1 && onPick(list[0].id)} />
+      )}
+      <ul className="flex max-h-[232px] flex-wrap gap-2 overflow-y-auto overscroll-contain p-0.5">
+        {list.map((c) => (
+          <li key={c.id}>
+            <button
+              type="button"
+              onClick={() => onPick(c.id)}
+              className="pressable h-11 rounded-full bg-surface-2 px-4 text-[16px] font-medium text-ink hover:brightness-[0.97] active:bg-accent-soft active:text-accent dark:hover:brightness-[1.15]"
             >
-              <option value="" disabled>
-                {r.placeholder}
-              </option>
-              {r.options.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
-            <CaretUpDownIcon className="pointer-events-none absolute right-4 size-4 text-ink-2" aria-hidden />
-          </label>
-        </div>
-      ))}
+              {c.name}
+            </button>
+          </li>
+        ))}
+        {list.length === 0 && <li className="px-1 py-2 text-[15px] text-ink-2">Sin resultados para “{q}”</li>}
+      </ul>
+    </div>
+  );
+}
+
+function EmployeeStep({ company, onPick }: { company: KioskCompany; onPick: (id: string) => void }) {
+  const [q, setQ] = useState("");
+  const list = useFiltered(company.employees, q);
+  return (
+    <div>
+      <StepTitle>¿Quién eres?</StepTitle>
+      {company.employees.length >= SEARCH_FROM && (
+        <SearchField value={q} onChange={setQ} placeholder="Busca tu nombre" onEnter={() => list.length === 1 && onPick(list[0].id)} />
+      )}
+      <ul className="max-h-[264px] overflow-y-auto overscroll-contain rounded-2xl bg-surface-2">
+        {list.map((e, i) => (
+          <li key={e.id}>
+            {i > 0 && <div className="ml-[3.75rem] h-px bg-line" />}
+            <button
+              type="button"
+              onClick={() => onPick(e.id)}
+              className="pressable flex h-[52px] w-full items-center gap-3 px-4 text-left active:bg-accent-soft"
+            >
+              <span
+                aria-hidden
+                className="grid size-8 shrink-0 place-items-center rounded-full bg-surface text-[13px] font-semibold text-ink-2"
+              >
+                {initials(e.name)}
+              </span>
+              <span className="truncate text-[17px] text-ink">{e.name}</span>
+            </button>
+          </li>
+        ))}
+        {list.length === 0 && (
+          <li className="px-4 py-4 text-[15px] text-ink-2">
+            No encontramos “{q}” en {company.name}. Pide ayuda en la barra.
+          </li>
+        )}
+      </ul>
     </div>
   );
 }
